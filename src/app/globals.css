@@ -1,4 +1,6 @@
 :root {
+  --font-body: Inter, ui-sans-serif;
+  --font-display: Manrope, Inter, ui-sans-serif;
   --ink: #16221e;
   --muted: #65736d;
   --line: #e1e7e4;

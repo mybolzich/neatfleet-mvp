@@ -35,8 +35,6 @@ jobs:
 
       - name: Build static frontend
         run: npm run build
-        env:
-          GITHUB_PAGES: "true"
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
@@ -44,7 +42,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./dist/client
+          path: ./dist
 
       - name: Deploy to GitHub Pages
         id: deployment

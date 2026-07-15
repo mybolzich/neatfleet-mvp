@@ -26,8 +26,20 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { routes as seedRoutes, vehicles, visits as seedVisits, workers } from "@/domain/demo-data";
-import type { JobKind, Route, Visit } from "@/domain/models";
+import { assignInBrowser, dispatchInBrowser, optimizeInBrowser } from "@/domain/client-operations";
+import type { CreateJobInput, JobKind, Route, Visit } from "@/domain/models";
 import { summarizeRoute } from "@/domain/models";
+
+const demoStorageKey = "neatfleet-mvp-planner-v1";
+
+function loadDemoState(): { visits: Visit[]; routes: Route[] } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return JSON.parse(window.localStorage.getItem(demoStorageKey) ?? "null") as { visits: Visit[]; routes: Route[] } | null;
+  } catch {
+    return null;
+  }
+}
 
 const kindLabel: Record<JobKind, string> = {
   service: "Service",
@@ -49,29 +61,20 @@ export function DispatcherWorkspace() {
   const [query, setQuery] = useState("");
   const [selectedVisitId, setSelectedVisitId] = useState("v-104");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [liveVisits, setLiveVisits] = useState<Visit[]>(seedVisits);
-  const [liveRoutes, setLiveRoutes] = useState<Route[]>(seedRoutes);
+  const [liveVisits, setLiveVisits] = useState<Visit[]>(() => loadDemoState()?.visits ?? seedVisits);
+  const [liveRoutes, setLiveRoutes] = useState<Route[]>(() => loadDemoState()?.routes ?? seedRoutes);
   const [showCreateJob, setShowCreateJob] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
-    void fetch("/api/operations").then((response) => response.json()).then((data: { visits: Visit[]; routes: Route[] }) => {
-      setLiveVisits(data.visits);
-      setLiveRoutes(data.routes);
-    });
-  }, []);
+    window.localStorage.setItem(demoStorageKey, JSON.stringify({ visits: liveVisits, routes: liveRoutes }));
+  }, [liveRoutes, liveVisits]);
 
-  async function runAction(action: string, request: () => Promise<Response>) {
+  function runAction(action: string, request: () => string) {
     setBusyAction(action);
     try {
-      const response = await request();
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "Something went wrong.");
-      const refreshed = await fetch("/api/operations").then((item) => item.json()) as { visits: Visit[]; routes: Route[] };
-      setLiveVisits(refreshed.visits);
-      setLiveRoutes(refreshed.routes);
-      setToast(data.message ?? "Saved successfully.");
+      setToast(request());
       window.setTimeout(() => setToast(null), 3200);
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Something went wrong.");
@@ -81,15 +84,46 @@ export function DispatcherWorkspace() {
   }
 
   function optimize() {
-    void runAction("optimize", () => fetch("/api/operations/optimize", { method: "POST" }));
+    runAction("optimize", () => {
+      const optimized = optimizeInBrowser(liveVisits, liveRoutes, workers);
+      setLiveVisits(optimized.visits);
+      setLiveRoutes(optimized.routes);
+      return "Routes optimized across the available team and fleet.";
+    });
   }
 
   function dispatchRoute(routeId: string) {
-    void runAction(`dispatch-${routeId}`, () => fetch("/api/operations/dispatch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ routeId }) }));
+    runAction(`dispatch-${routeId}`, () => {
+      setLiveRoutes(dispatchInBrowser(liveRoutes, routeId));
+      return "Route dispatched to the assigned field worker.";
+    });
   }
 
   function assignJob(visitId: string, routeId: string) {
-    void runAction(`assign-${visitId}`, () => fetch("/api/operations/assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ visitId, routeId }) }));
+    runAction(`assign-${visitId}`, () => {
+      const assigned = assignInBrowser(liveVisits, liveRoutes, visitId, routeId);
+      setLiveVisits(assigned.visits);
+      setLiveRoutes(assigned.routes);
+      return "Selected job added to the route.";
+    });
+  }
+
+  function createJob(input: CreateJobInput) {
+    const sequence = liveVisits.length + 1;
+    const visit: Visit = {
+      ...input,
+      id: `v-demo-${Date.now()}`,
+      jobId: `NF-${2400 + sequence}`,
+      location: { lat: 14.5547 + sequence * 0.001, lng: 121.0346 + sequence * 0.001 },
+      requiredSkills: [],
+      demand: { units: 1 },
+      status: "unassigned",
+    };
+    setLiveVisits((current) => [...current, visit]);
+    setSelectedVisitId(visit.id);
+    setShowCreateJob(false);
+    setToast("New job added to the unassigned queue.");
+    window.setTimeout(() => setToast(null), 3200);
   }
 
   const unassigned = useMemo(
@@ -196,7 +230,7 @@ export function DispatcherWorkspace() {
               ))}
               {unassigned.length === 0 ? <div className="empty-search">No jobs match that search.</div> : null}
             </div>
-            <button className="add-job-button"><Plus size={16} /> Add another job</button>
+            <button className="add-job-button" onClick={() => setShowCreateJob(true)}><Plus size={16} /> Add another job</button>
           </div>
 
           <div className="routes-panel">
@@ -266,7 +300,7 @@ export function DispatcherWorkspace() {
           </div>
         </section>
         {toast ? <div className="toast" role="status"><span className="toast-dot" />{toast}</div> : null}
-        {showCreateJob ? <CreateJobModal onClose={() => setShowCreateJob(false)} onCreated={() => { setShowCreateJob(false); void fetch("/api/operations").then((response) => response.json()).then((data: { visits: Visit[]; routes: Route[] }) => { setLiveVisits(data.visits); setLiveRoutes(data.routes); setToast("New job added to the unassigned queue."); window.setTimeout(() => setToast(null), 3200); }); }} /> : null}
+        {showCreateJob ? <CreateJobModal onClose={() => setShowCreateJob(false)} onCreated={createJob} /> : null}
       </main>
     </div>
   );
@@ -291,15 +325,19 @@ function MapMarker({ number, color, position, active }: { number: string; color:
   return <button className={`map-marker ${active ? "active" : ""}`} style={{ ...position, background: color }} aria-label={`Route stop ${number}`}>{number}</button>;
 }
 
-function CreateJobModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function CreateJobModal({ onClose, onCreated }: { onClose: () => void; onCreated: (job: CreateJobInput) => void }) {
   const [form, setForm] = useState({ customerName: "", address: "", kind: "service" as JobKind, serviceMinutes: "30", priority: "normal" });
   const [saving, setSaving] = useState(false);
-  async function submit(event: React.FormEvent<HTMLFormElement>) {
+  function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
-    const response = await fetch("/api/operations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, serviceMinutes: Number(form.serviceMinutes), timeWindow: { start: "09:00", end: "17:00" } }) });
+    onCreated({
+      ...form,
+      priority: form.priority as Visit["priority"],
+      serviceMinutes: Number(form.serviceMinutes),
+      timeWindow: { start: "09:00", end: "17:00" },
+    });
     setSaving(false);
-    if (response.ok) onCreated();
   }
   return <div className="modal-backdrop" role="presentation"><form className="modal-card" onSubmit={submit}><div className="modal-header"><div><span className="eyebrow">New work item</span><h2>Create a job</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close create job dialog"><X size={18} /></button></div><label>Customer or site<input required value={form.customerName} onChange={(event) => setForm({ ...form, customerName: event.target.value })} placeholder="e.g. Acme Facilities" /></label><label>Address<input required value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} placeholder="Street, city, region" /></label><div className="form-grid"><label>Job type<select value={form.kind} onChange={(event) => setForm({ ...form, kind: event.target.value as JobKind })}>{Object.entries(kindLabel).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>Service minutes<input type="number" min="5" max="480" value={form.serviceMinutes} onChange={(event) => setForm({ ...form, serviceMinutes: event.target.value })} /></label></div><label>Priority<select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></label><div className="modal-actions"><button type="button" className="soft-button" onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Creating…" : "Create job"}</button></div></form></div>;
 }

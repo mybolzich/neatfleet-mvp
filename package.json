@@ -5,10 +5,9 @@
   "type": "module",
   "packageManager": "npm@11.6.2",
   "scripts": {
-    "dev": "next dev",
-    "build": "vinext build",
-    "postbuild": "node scripts/create-host-entry.cjs",
-    "start": "next start",
+    "dev": "vite",
+    "build": "vite build",
+    "start": "vite preview",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -25,11 +24,13 @@
     "@types/pg": "8.20.0",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
     "@vitejs/plugin-rsc": "^0.5.27",
     "eslint": "9.39.5",
     "eslint-config-next": "16.2.10",
     "typescript": "6.0.3",
     "vinext": "^1.0.0-beta.1",
+    "vite": "^8.1.4",
     "vitest": "4.1.10"
   }
 }
