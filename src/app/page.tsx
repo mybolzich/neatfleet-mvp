@@ -1,6 +1,5 @@
-import { DispatcherWorkspace } from "@/components/dispatcher-workspace";
+import { NeatFleetApp } from "@/components/neatfleet-app";
 
 export default function Home() {
-  return <DispatcherWorkspace />;
+  return <NeatFleetApp />;
 }
-
